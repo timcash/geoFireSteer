@@ -1,5 +1,5 @@
 (function() {
-  var init, makeGfxPoint, makeTarget, makeVehicle, sim, start, step, targets, totaltime, truncate, updateVehicles, webgl;
+  var init, makeGfxPoint, makeTarget, makeVehicle, seek, sim, start, step, targets, totaltime, truncate, updateVehicles, webgl;
 
   sim = {};
 
@@ -24,15 +24,18 @@
     }).appendTo(container);
     init();
     webgl.bind('update', function() {
-      var v, vx, vy, _i, _len, _ref;
+      var sx, sy, v, vx, vy, _i, _len, _ref;
       _ref = sim.vehicles;
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         v = _ref[_i];
         v.gfx.translation.x = v.pos.elements[0];
         v.gfx.translation.y = v.pos.elements[1];
-        vx = v.vel.elements[0] * 30;
-        vy = v.vel.elements[1] * 30;
+        vx = v.vel.elements[0] * 20;
+        vy = v.vel.elements[1] * 20;
         v.gfx.line.vertices[1].set(vx, vy);
+        sx = v.steer.elements[0] * 20;
+        sy = v.steer.elements[1] * 20;
+        v.gfx.steer.vertices[1].set(sx, sy);
       }
       return 0;
     }).play();
@@ -45,9 +48,9 @@
     sim.vehicles = [];
     sim.Ref = new Firebase('https://scoreboard3.firebaseio.com/geodata');
     sim.geoRef = new geoFire(sim.Ref);
-    for (i = _i = 0; _i <= 4; i = ++_i) {
-      x = Math.random() * $(window).width();
-      y = Math.random() * $(window).height();
+    for (i = _i = 0; _i <= 1; i = ++_i) {
+      x = 50 + (Math.random() * ($(window).width() - 50));
+      y = 50 + (Math.random() * ($(window).height() - 50));
       t = makeTarget(x, y);
       targets.push(t);
     }
@@ -64,15 +67,19 @@
   };
 
   makeGfxPoint = function(x, y) {
-    var c, group, l;
+    var c, group, l, st;
     c = webgl.makeCircle(0, 0, 10);
     c.fill = '#cccccc';
     c.noStroke();
     l = webgl.makeLine(0, 0, 0, 0);
     l.linewidth = 3;
     l.stroke = '#22ee22';
-    group = webgl.makeGroup(c, l);
+    st = webgl.makeLine(0, 0, 0, 0);
+    st.linewidth = 3;
+    st.stroke = '#2222ee';
+    group = webgl.makeGroup(c, l, st);
     group.line = l;
+    group.steer = st;
     group.domElement = webgl.renderer.domElement;
     return group;
   };
@@ -99,45 +106,55 @@
     vy = Math.random();
     v = {
       pos: Vector.create([x, y]),
-      vel: Vector.create([0, 0]),
-      acc: Vector.create([0, 0]),
+      vel: Vector.create([10.0, 10.0]),
+      acc: Vector.create([0.0, 0.0]),
+      steer: Vector.create([0.0, 0.0]),
       target: utils.randItem(targets).pos,
       hp: 0,
       gfx: makeGfxPoint(x, y),
-      maxVel: (Math.random() + 1) * 20,
-      maxForce: (1.0 / 60.0) * 10.0,
-      mass: 40.0,
-      maxSpeed: 10.0,
+      maxVel: 1.5,
+      maxForce: 0.2,
+      mass: 20.0,
+      maxSpeed: 1.0,
       id: i
     };
+    v.vel = truncate(v.vel, v.maxVel);
     return v;
   };
 
   truncate = function(vec, max) {
-    var mag;
-    mag = vec.modulus();
-    if (mag > max) {
-      return vec.x(max / mag);
+    var i;
+    i = max / vec.modulus();
+    if (i < 1.0) {
+      i = 1.0;
     }
-    return vec;
+    return vec.x(i);
   };
 
   updateVehicles = function(dt) {
-    var desired_vel, n, steering, t_p, v, _i, _len, _ref, _results;
+    var steer, v, _i, _len, _ref, _results;
     _ref = sim.vehicles;
     _results = [];
     for (_i = 0, _len = _ref.length; _i < _len; _i++) {
       v = _ref[_i];
-      t_p = v.target.subtract(v.pos);
-      n = t_p.toUnitVector();
-      desired_vel = n.x(v.maxVel * dt);
-      steering = desired_vel.subtract(v.vel);
-      steering = truncate(steering, v.maxForce);
-      steering = steering.x(1 / v.mass);
-      v.vel = truncate(v.vel.add(steering), v.maxSpeed);
+      steer = seek(v);
+      steer = truncate(steer, v.maxForce);
+      v.steer = steer;
+      steer = steer.x(1.0 / v.mass);
+      v.vel = v.vel.add(steer);
+      v.vel = truncate(v.vel, v.maxVel);
       _results.push(v.pos = v.pos.add(v.vel));
     }
     return _results;
+  };
+
+  seek = function(v) {
+    var des, force;
+    des = v.target.subtract(v.pos);
+    des = des.toUnitVector();
+    des = des.x(v.maxVel);
+    force = des.subtract(v.vel);
+    return force;
   };
 
   step = function(timestamp) {
